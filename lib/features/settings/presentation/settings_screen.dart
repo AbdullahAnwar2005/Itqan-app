@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/routing/app_router.dart';
 import '../../../core/design/components/itqan_top_app_bar.dart';
 import '../../../core/design/tokens/app_spacing.dart';
 import '../../../core/design/tokens/app_typography.dart';
@@ -70,6 +71,14 @@ class _SettingsList extends ConsumerWidget {
           icon: Icons.refresh_rounded,
           color: Colors.red,
           onTap: () => _showResetDialog(context, ref),
+        ),
+        const Divider(height: AppSpacing.xxl),
+        _SectionHeader(title: 'بيانات الحفظ'),
+        _ActionTile(
+          label: 'سجل الحفظ السابق',
+          icon: Icons.history_edu,
+          color: Theme.of(context).primaryColor,
+          onTap: () => context.pushNamed(AppRoutes.previousMemorizationRegistry),
         ),
       ],
     );

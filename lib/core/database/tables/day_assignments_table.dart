@@ -10,25 +10,32 @@ class DayAssignments extends Table {
   TextColumn get dateKey => text()(); // local date, format YYYY-MM-DD
 
   IntColumn get memorizationStartSurah => integer()();
-
   IntColumn get memorizationStartAyah => integer()();
 
   IntColumn get memorizationEndSurah => integer()();
-
   IntColumn get memorizationEndAyah => integer()();
 
   RealColumn get memorizationAmount => real()();
-
   TextColumn get memorizationUnit => text()();
 
   RealColumn get reviewAmount => real()();
-
   TextColumn get reviewUnit => text()();
 
   BoolColumn get isMemorizationDone =>
       boolean().withDefault(const Constant(false))();
 
   BoolColumn get isReviewDone => boolean().withDefault(const Constant(false))();
+
+  // --- Schedule task flags (added in schema v2) ---
+  // Default true for backward compatibility with existing rows.
+
+  /// Whether today is a scheduled memorization day.
+  BoolColumn get hasMemoTask =>
+      boolean().withDefault(const Constant(true))();
+
+  /// Whether today is a scheduled review day with known content to review.
+  BoolColumn get hasReviewTask =>
+      boolean().withDefault(const Constant(true))();
 
   DateTimeColumn get createdAt => dateTime()();
 

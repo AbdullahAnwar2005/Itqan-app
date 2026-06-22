@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/design/tokens/app_radius.dart';
 import '../../../../core/design/tokens/app_spacing.dart';
 import '../../../../core/design/tokens/app_typography.dart';
 import '../../../../core/design/theme/itqan_theme_extension.dart';
+import '../../application/today_mode_provider.dart';
+import '../../domain/today_mode.dart';
 import '../../domain/today_task.dart';
 
-class TodayTaskItem extends StatelessWidget {
+class TodayTaskItem extends ConsumerWidget {
   const TodayTaskItem({
     super.key,
     required this.task,
@@ -16,9 +19,14 @@ class TodayTaskItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final itqanTheme = theme.extension<ItqanThemeExtension>()!;
+    final currentMode = ref.watch(todayModeProvider);
+
+    final isLightMode = currentMode == TodayMode.lightRecovery;
+    final isMemoTask = task.type == TodayTaskType.memorization;
+    final isDeemphasized = isLightMode && isMemoTask;
 
     final taskColor = task.type == TodayTaskType.memorization
         ? itqanTheme.memorizeActive
@@ -36,56 +44,82 @@ class TodayTaskItem extends StatelessWidget {
           width: 1,
         ),
         boxShadow: [
-          if (!task.isCompleted)
+          if (!task.isCompleted && !isDeemphasized)
             BoxShadow(
-              color: theme.shadowColor.withValues(alpha: 0.03),
-              blurRadius: 8,
+              color: theme.shadowColor.withValues(alpha: 0.04),
+              blurRadius: 10,
               offset: const Offset(0, 4),
             ),
         ],
       ),
-      child: InkWell(
-        onTap: task.isCompleted ? null : onTap,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Row(
-            children: [
-              _TaskTypeIndicator(
-                type: task.type,
-                activeColor: taskColor,
-              ),
-              const SizedBox(width: AppSpacing.lg),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      task.title,
-                      style: AppTypography.label.copyWith(
-                        color: task.isCompleted
-                            ? theme.disabledColor
-                            : theme.colorScheme.onSurface,
-                        decoration: task.isCompleted
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      task.targetDescription,
-                      style: AppTypography.bodySmall.copyWith(
-                        color: theme.hintColor,
-                      ),
-                    ),
-                  ],
+      child: Opacity(
+        opacity: task.isCompleted ? 0.6 : (isDeemphasized ? 0.7 : 1.0),
+        child: InkWell(
+          onTap: task.isCompleted ? null : onTap,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Row(
+              children: [
+                _TaskTypeIndicator(
+                  type: task.type,
+                  activeColor: taskColor,
                 ),
-              ),
-              _CompletionAffordance(
-                isCompleted: task.isCompleted,
-                activeColor: itqanTheme.completed,
-              ),
-            ],
+                const SizedBox(width: AppSpacing.lg),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            task.title,
+                            style: AppTypography.label.copyWith(
+                              color: task.isCompleted
+                                  ? theme.disabledColor
+                                  : theme.colorScheme.onSurface,
+                              decoration: task.isCompleted
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                          ),
+                          if (isDeemphasized) ...[
+                            const SizedBox(width: AppSpacing.sm),
+                            Text(
+                              '(اختياري اليوم)',
+                              style: AppTypography.bodySmall.copyWith(
+                                color: theme.hintColor,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        task.targetDescription,
+                        style: AppTypography.bodySmall.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                      if (task.type == TodayTaskType.oldReview) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'من الحفظ السابق الذي أدخلته',
+                          style: AppTypography.label.copyWith(
+                            color: theme.hintColor.withValues(alpha: 0.7),
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                _CompletionAffordance(
+                  isCompleted: task.isCompleted,
+                  activeColor: itqanTheme.completed,
+                ),
+              ],
+            ),
           ),
         ),
       ),

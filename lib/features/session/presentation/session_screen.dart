@@ -8,6 +8,7 @@ import '../../../core/design/tokens/app_radius.dart';
 import '../../../core/utils/arabic_formatter.dart';
 import '../application/session_providers.dart';
 import '../domain/session.dart';
+import '../domain/session_rating.dart';
 
 class SessionScreen extends ConsumerWidget {
   const SessionScreen({super.key});
@@ -53,22 +54,24 @@ class SessionScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('إلغاء الجلسة؟'),
+        title: const Text('إيقاف الجلسة؟'),
         content: const Text(
-            'هل أنت متأكد من رغبتك في إلغاء الجلسة الحالية؟ لن يتم حفظ التقدم.'),
+            'هل تود التوقف عن الجلسة الحالية؟ لن يتم حفظ ما أنجزته.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('استمرار'),
+            child: const Text('إكمال الجلسة'),
           ),
           TextButton(
             onPressed: () {
               ref.read(sessionControllerProvider.notifier).cancelSession();
               Navigator.pop(context);
-              // Go back to today
               context.go('/');
             },
-            child: const Text('إلغاء', style: TextStyle(color: Colors.red)),
+            child: Text(
+              'توقف',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -95,7 +98,7 @@ class _SessionContent extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(AppSpacing.xl),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
           child: Icon(
@@ -109,8 +112,8 @@ class _SessionContent extends StatelessWidget {
         const SizedBox(height: AppSpacing.xxl),
         Text(
           session.type == SessionType.memorization
-              ? 'النطاق المستهدف'
-              : 'المراجعة المطلوبة',
+              ? 'مقرر الحفظ'
+              : 'مقرر المراجعة',
           style: AppTypography.label.copyWith(color: theme.hintColor),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -149,32 +152,57 @@ class _SessionActions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () async {
-              await ref
-                  .read(sessionControllerProvider.notifier)
-                  .completeSession();
-              if (context.mounted) {
-                _showCompletionDialog(context, ref);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
+        Text(
+          'كيف كان التسميع؟',
+          style: AppTypography.cardTitle,
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _RatingButton(
+              rating: SessionRating.easy,
+              color: Colors.green,
+              onPressed: () => _handleRating(context, ref, SessionRating.easy),
             ),
-            child: const Text('إتمام الجلسة',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ),
+            _RatingButton(
+              rating: SessionRating.good,
+              color: Colors.blue,
+              onPressed: () => _handleRating(context, ref, SessionRating.good),
+            ),
+            _RatingButton(
+              rating: SessionRating.hard,
+              color: Colors.orange,
+              onPressed: () => _handleRating(context, ref, SessionRating.hard),
+            ),
+            _RatingButton(
+              rating: SessionRating.again,
+              color: Colors.red,
+              onPressed: () => _handleRating(context, ref, SessionRating.again),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  void _showCompletionDialog(BuildContext context, WidgetRef ref) {
+  Future<void> _handleRating(BuildContext context, WidgetRef ref, SessionRating rating) async {
+    await ref.read(sessionControllerProvider.notifier).completeSession(rating);
+    if (context.mounted) {
+      _showCompletionDialog(context, ref, rating);
+    }
+  }
+
+  void _showCompletionDialog(BuildContext context, WidgetRef ref, SessionRating rating) {
+    final isAgain = rating == SessionRating.again && session.type == SessionType.memorization;
+    
+    final iconColor = isAgain ? Colors.orange : Colors.green;
+    final iconData = isAgain ? Icons.info_outline_rounded : Icons.check_circle_rounded;
+    final title = isAgain ? 'محاولة جيدة' : 'الحمد لله';
+    final message = isAgain 
+        ? 'تم تسجيل المحاولة. سيبقى هذا الورد حتى تتمكن من تسميعه.' 
+        : 'لقد أتممت وردك اليوم بنجاح.';
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -184,12 +212,12 @@ class _SessionActions extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: AppSpacing.md),
-            const Icon(Icons.check_circle_rounded, color: Colors.green, size: 64),
+            Icon(iconData, color: iconColor, size: 64),
             const SizedBox(height: AppSpacing.lg),
-            Text('أحسنت! الحمد لله', style: AppTypography.cardTitle),
+            Text(title, style: AppTypography.cardTitle),
             const SizedBox(height: AppSpacing.sm),
-            const Text(
-              'لقد أتممت وردك بنجاح. استمر في هذا الإنجاز!',
+            Text(
+              message,
               textAlign: TextAlign.center,
             ),
           ],
@@ -203,10 +231,48 @@ class _SessionActions extends ConsumerWidget {
                 Navigator.pop(context);
                 context.go('/');
               },
-              child: const Text('العودة للرئيسية'),
+              child: const Text('العودة'),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RatingButton extends StatelessWidget {
+  const _RatingButton({
+    required this.rating,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final SessionRating rating;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
+        child: ElevatedButton(
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: color.withValues(alpha: 0.1),
+            foregroundColor: color,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: BorderSide(color: color.withValues(alpha: 0.3)),
+            ),
+          ),
+          child: Text(
+            rating.labelAr,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
       ),
     );
   }
@@ -226,11 +292,11 @@ class _NoActiveSessionState extends StatelessWidget {
             Icon(
               Icons.play_circle_outline,
               size: 64,
-              color: Theme.of(context).hintColor.withOpacity(0.5),
+              color: Theme.of(context).hintColor.withValues(alpha: 0.5),
             ),
             const SizedBox(height: AppSpacing.md),
             const Text(
-              'لا توجد جلسة نشطة حالياً.',
+              'لا توجد جلسة حالياً.',
               style: AppTypography.bodyLarge,
             ),
             const SizedBox(height: AppSpacing.lg),

@@ -88,6 +88,9 @@ class MockPlanRepository implements PlanRepository {
   Future<void> saveAssignment(DayAssignmentEntity assignment) async {}
 
   @override
+  Future<bool> hasCompletedMemorizationSession(String planId) async => false;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -104,6 +107,10 @@ ActivePlanEntity _mockPlan({
     reviewTarget: const DailyTarget(amount: 1, unit: ProgressUnit.juz),
     startPosition: const QuranPosition(surahNumber: 1, ayahNumber: 1),
     currentPosition: current ?? const QuranPosition(surahNumber: 1, ayahNumber: 1),
+    memorizationDays: const {1, 2, 3, 4, 5, 6, 7},
+    reviewSchedule: ReviewSchedule.everyday,
+    customReviewDays: const {},
+    previousMemorizedRanges: const [],
   );
 }
 

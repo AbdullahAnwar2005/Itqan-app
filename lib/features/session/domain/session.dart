@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import '../../plan/domain/day_assignment.dart';
+import '../../plan/domain/quran_position.dart';
 
 /// Types of work sessions.
 enum SessionType {
@@ -41,6 +42,9 @@ class WorkSession extends Equatable {
     this.status = SessionStatus.idle,
     this.startedAt,
     this.endedAt,
+    this.reviewStart,
+    this.reviewEnd,
+    this.segmentProgressId,
   });
 
   final String id;
@@ -49,6 +53,9 @@ class WorkSession extends Equatable {
   final SessionStatus status;
   final DateTime? startedAt;
   final DateTime? endedAt;
+  final QuranPosition? reviewStart;
+  final QuranPosition? reviewEnd;
+  final String? segmentProgressId;
 
   bool get isCompleted => status == SessionStatus.completed;
 
@@ -56,6 +63,9 @@ class WorkSession extends Equatable {
     SessionStatus? status,
     DateTime? startedAt,
     DateTime? endedAt,
+    QuranPosition? reviewStart,
+    QuranPosition? reviewEnd,
+    String? segmentProgressId,
   }) {
     return WorkSession(
       id: id,
@@ -64,9 +74,12 @@ class WorkSession extends Equatable {
       status: status ?? this.status,
       startedAt: startedAt ?? this.startedAt,
       endedAt: endedAt ?? this.endedAt,
+      reviewStart: reviewStart ?? this.reviewStart,
+      reviewEnd: reviewEnd ?? this.reviewEnd,
+      segmentProgressId: segmentProgressId ?? this.segmentProgressId,
     );
   }
 
   @override
-  List<Object?> get props => [id, type, assignment, status, startedAt, endedAt];
+  List<Object?> get props => [id, type, assignment, status, startedAt, endedAt, reviewStart, reviewEnd, segmentProgressId];
 }

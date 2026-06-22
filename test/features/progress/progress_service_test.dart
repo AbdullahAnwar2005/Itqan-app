@@ -85,6 +85,10 @@ ActivePlanEntity _mockPlan() {
     reviewTarget: const DailyTarget(amount: 1, unit: ProgressUnit.juz),
     startPosition: const QuranPosition(surahNumber: 1, ayahNumber: 1),
     currentPosition: const QuranPosition(surahNumber: 1, ayahNumber: 1),
+    memorizationDays: const {1, 2, 3, 4, 5, 6, 7},
+    reviewSchedule: ReviewSchedule.everyday,
+    customReviewDays: const {},
+    previousMemorizedRanges: const [],
   );
 }
 

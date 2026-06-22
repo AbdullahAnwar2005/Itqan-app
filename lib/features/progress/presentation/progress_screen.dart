@@ -1,29 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../../../core/design/components/itqan_top_app_bar.dart';
-import '../../../core/design/tokens/app_spacing.dart';
-import '../../../core/design/tokens/app_typography.dart';
 import '../../../core/design/theme/itqan_theme_extension.dart';
 import '../../../core/design/tokens/app_radius.dart';
-import '../../../core/utils/arabic_formatter.dart';
+import '../../../core/design/tokens/app_spacing.dart';
+import '../../../core/design/tokens/app_typography.dart';
 import '../application/progress_providers.dart';
-import '../domain/progress_models.dart';
+import '../domain/progress_insight_models.dart';
+import '../domain/segment_progress_source.dart';
+import '../domain/segment_progress_status.dart';
 
 class ProgressScreen extends ConsumerWidget {
   const ProgressScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final summaryAsync = ref.watch(progressSummaryProvider);
+    final summaryAsync = ref.watch(progressInsightSummaryProvider);
 
     return Scaffold(
       appBar: const ItqanTopAppBar(title: 'تقدمي'),
       body: summaryAsync.when(
-        data: (summary) => summary == null
-            ? const _NoProgressState()
-            : _ProgressContent(summary: summary),
+        data: (summary) =>
+            (summary == null || summary.totalTrackedSegments == 0)
+                ? const _NoProgressState()
+                : _ProgressContent(summary: summary),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(child: Text('Error: $err')),
+        error: (err, _) =>
+            Center(child: Text('عذرًا، حدث خطأ في تحميل البيانات: $err')),
       ),
     );
   }
@@ -32,7 +36,7 @@ class ProgressScreen extends ConsumerWidget {
 class _ProgressContent extends StatelessWidget {
   const _ProgressContent({required this.summary});
 
-  final ProgressSummary summary;
+  final ProgressInsightSummary summary;
 
   @override
   Widget build(BuildContext context) {
@@ -41,211 +45,103 @@ class _ProgressContent extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _MemorizationPositionCard(snapshot: summary.memorization),
+          const _SectionHeader(title: 'نظرة عامة'),
+          const SizedBox(height: AppSpacing.xs),
+          _OverviewSection(summary: summary),
           const SizedBox(height: AppSpacing.lg),
-          _RecentExecutionCard(activity: summary.recentActivity),
+          const _SectionHeader(title: 'حالة الإتقان'),
+          const SizedBox(height: AppSpacing.xs),
+          _MasterySection(summary: summary),
           const SizedBox(height: AppSpacing.lg),
-          _ConsistencyCard(consistency: summary.consistency),
+          const _SectionHeader(title: 'مصادر الحفظ'),
+          const SizedBox(height: AppSpacing.xs),
+          _SourcesSection(summary: summary),
+          const SizedBox(height: AppSpacing.lg),
+          const _SectionHeader(title: 'مقاطع تحتاج انتباه'),
+          const SizedBox(height: AppSpacing.xs),
+          _PrioritySegmentsSection(summary: summary),
+          const SizedBox(height: AppSpacing.lg),
+          const _SectionHeader(title: 'النشاط الأخير'),
+          const SizedBox(height: AppSpacing.xs),
+          _RecentActivitySection(summary: summary),
         ],
       ),
     );
   }
 }
 
-class _MemorizationPositionCard extends StatelessWidget {
-  const _MemorizationPositionCard({required this.snapshot});
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title});
 
-  final MemorizationProgressSnapshot snapshot;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
-
-    return Card(
-      elevation: 0,
-      color: theme.cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.menu_book_rounded, color: itqanTheme.memorizeActive),
-                const SizedBox(width: AppSpacing.sm),
-                Text('أين وصلت الآن؟', style: AppTypography.cardTitle),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            _PositionStep(
-              label: 'بدأت من',
-              position: snapshot.startPosition,
-              isActive: false,
-            ),
-            const _StepDivider(),
-            _PositionStep(
-              label: 'وصلت إلى',
-              position: snapshot.currentPosition,
-              isActive: true,
-              color: itqanTheme.memorizeActive,
-            ),
-          ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Text(
+        title,
+        style: AppTypography.label.copyWith(
+          fontWeight: FontWeight.bold,
+          color: theme.textTheme.bodyLarge?.color,
         ),
       ),
     );
   }
 }
 
-class _RecentExecutionCard extends StatelessWidget {
-  const _RecentExecutionCard({required this.activity});
+class _OverviewSection extends StatelessWidget {
+  const _OverviewSection({required this.summary});
 
-  final RecentActivitySummary activity;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
-
-    return Card(
-      elevation: 0,
-      color: theme.cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('الإنجاز في الأيام السبعة الأخيرة',
-                style: AppTypography.cardTitle),
-            const SizedBox(height: AppSpacing.lg),
-            _MetricRow(
-              label: 'مهام حفظ منجزة',
-              value: '${activity.completedMemorizationTasks}',
-              icon: Icons.check_circle_outline,
-              color: itqanTheme.memorizeActive,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _MetricRow(
-              label: 'مهام مراجعة منجزة',
-              value: '${activity.completedReviewTasks}',
-              icon: Icons.history,
-              color: itqanTheme.reviewDue,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _MetricRow(
-              label: 'أيام مكتملة كلياً',
-              value: '${activity.completedDays}',
-              icon: Icons.calendar_today,
-              color: itqanTheme.completed,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ConsistencyCard extends StatelessWidget {
-  const _ConsistencyCard({required this.consistency});
-
-  final ConsistencySummary consistency;
+  final ProgressInsightSummary summary;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final itqanTheme = theme.extension<ItqanThemeExtension>()!;
 
-    return Card(
-      elevation: 0,
-      color: theme.cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(color: theme.dividerColor.withOpacity(0.1)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('الاستمرارية', style: AppTypography.cardTitle),
-            const SizedBox(height: AppSpacing.lg),
-            Row(
-              children: [
-                Expanded(
-                  child: _BigMetric(
-                    label: 'السلسلة الحالية',
-                    value:
-                        ArabicFormatter.formatDays(consistency.currentStreak),
-                    color: itqanTheme.memorizeActive,
-                  ),
-                ),
-                Container(
-                    width: 1,
-                    height: 40,
-                    color: theme.dividerColor.withOpacity(0.2)),
-                Expanded(
-                  child: _BigMetric(
-                    label: 'الأيام المكتملة',
-                    value:
-                        '${(consistency.completionRateRecent * 7).toInt()} من 7',
-                    unit: 'أيام',
-                    color: itqanTheme.completed,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PositionStep extends StatelessWidget {
-  const _PositionStep({
-    required this.label,
-    required this.position,
-    required this.isActive,
-    this.color,
-  });
-
-  final String label;
-  final dynamic position;
-  final bool isActive;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
+    return Column(
       children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: isActive ? color : theme.disabledColor.withOpacity(0.3),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.md),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Row(
           children: [
-            Text(label,
-                style:
-                    AppTypography.bodySmall.copyWith(color: theme.hintColor)),
-            Text(
-              ArabicFormatter.formatPosition(position),
-              style: AppTypography.label.copyWith(
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+            Expanded(
+              child: _OverviewCard(
+                title: 'مقاطع مستقرة',
+                value: '${summary.stableCount}',
+                color: itqanTheme.completed,
+                icon: Icons.verified_user_rounded,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: _OverviewCard(
+                title: 'تحتاج تثبيت',
+                value: '${summary.stabilizingCount}',
+                color: itqanTheme.reviewDue,
+                icon: Icons.hourglass_empty_rounded,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Row(
+          children: [
+            Expanded(
+              child: _OverviewCard(
+                title: 'تحتاج انتباه',
+                value: '${summary.weakCount + summary.needsRetryCount}',
+                color: itqanTheme.overdue,
+                icon: Icons.warning_amber_rounded,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: _OverviewCard(
+                title: 'مراجعات مستحقة',
+                value: '${summary.dueTodayCount}',
+                color: itqanTheme.selfTest,
+                icon: Icons.alarm_rounded,
               ),
             ),
           ],
@@ -255,89 +151,520 @@ class _PositionStep extends StatelessWidget {
   }
 }
 
-class _StepDivider extends StatelessWidget {
-  const _StepDivider();
+class _OverviewCard extends StatelessWidget {
+  const _OverviewCard({
+    required this.title,
+    required this.value,
+    required this.color,
+    required this.icon,
+  });
+
+  final String title;
+  final String value;
+  final Color color;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin:
-          const EdgeInsets.only(left: 5), // Align with center of 12px circle
-      height: 20,
-      width: 2,
-      color: Theme.of(context).dividerColor.withOpacity(0.1),
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      color: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style:
+                        AppTypography.caption.copyWith(color: theme.hintColor),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    value,
+                    style: AppTypography.cardTitle.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class _MetricRow extends StatelessWidget {
-  const _MetricRow({
+class _MasterySection extends StatelessWidget {
+  const _MasterySection({required this.summary});
+
+  final ProgressInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
+
+    return Column(
+      children: [
+        _MasteryStatusRow(
+          label: 'مستقر',
+          count: summary.stableCount,
+          color: itqanTheme.completed,
+          description: 'تمكنت من حفظها بشكل ممتاز',
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _MasteryStatusRow(
+          label: 'قيد التثبيت',
+          count: summary.stabilizingCount,
+          color: itqanTheme.reviewDue,
+          description: 'تحت المراجعة والتقوية المستمرة',
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _MasteryStatusRow(
+          label: 'ضعيف',
+          count: summary.weakCount,
+          color: itqanTheme.confidenceLow,
+          description: 'أخطاء متكررة أثناء التسميع',
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _MasteryStatusRow(
+          label: 'يحتاج إعادة',
+          count: summary.needsRetryCount,
+          color: itqanTheme.overdue,
+          description: 'يتطلب إعادة الحفظ بالكامل',
+        ),
+      ],
+    );
+  }
+}
+
+class _MasteryStatusRow extends StatelessWidget {
+  const _MasteryStatusRow({
     required this.label,
-    required this.value,
+    required this.count,
+    required this.color,
+    required this.description,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      color: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+        child: Row(
+          children: [
+            Container(
+              width: 8,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(AppRadius.xs),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: AppTypography.label
+                          .copyWith(fontWeight: FontWeight.bold)),
+                  Text(description,
+                      style: AppTypography.caption
+                          .copyWith(color: theme.hintColor)),
+                ],
+              ),
+            ),
+            Text(
+              '$count',
+              style: AppTypography.cardTitle.copyWith(
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SourcesSection extends StatelessWidget {
+  const _SourcesSection({required this.summary});
+
+  final ProgressInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _SourceCard(
+            label: 'من الحفظ الجديد',
+            count: summary.appMemorizationCount,
+            icon: Icons.add_circle_outline_rounded,
+            color: itqanTheme.memorizeActive,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: _SourceCard(
+            label: 'من الحفظ السابق',
+            count: summary.previousMemorizationCount,
+            icon: Icons.history_edu_rounded,
+            color: itqanTheme.reviewDue,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SourceCard extends StatelessWidget {
+  const _SourceCard({
+    required this.label,
+    required this.count,
     required this.icon,
     required this.color,
   });
 
   final String label;
-  final String value;
+  final int count;
   final IconData icon;
   final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 20, color: color.withOpacity(0.7)),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(child: Text(label, style: AppTypography.bodySmall)),
-        Text(value,
-            style: AppTypography.label
-                .copyWith(color: color, fontWeight: FontWeight.bold)),
-      ],
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      color: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: AppSpacing.sm),
+            Text(label,
+                style: AppTypography.caption.copyWith(color: theme.hintColor)),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '$count مقطع',
+              style: AppTypography.body.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.textTheme.bodyLarge?.color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
 
-class _BigMetric extends StatelessWidget {
-  const _BigMetric({
-    required this.label,
-    required this.value,
-    this.unit,
-    required this.color,
-  });
+class _PrioritySegmentsSection extends StatelessWidget {
+  const _PrioritySegmentsSection({required this.summary});
 
-  final String label;
-  final String value;
-  final String? unit;
-  final Color color;
+  final ProgressInsightSummary summary;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    if (summary.prioritySegments.isEmpty) {
+      return Card(
+        elevation: 0,
+        color: theme.cardColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Center(
+            child: Text(
+              'لا توجد مقاطع ضعيفة حاليًا.',
+              style: AppTypography.bodySmall.copyWith(color: theme.hintColor),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Column(
-      children: [
-        Text(label,
-            style: AppTypography.bodySmall.copyWith(color: theme.hintColor)),
-        const SizedBox(height: AppSpacing.xs),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
+      children: summary.prioritySegments.map((segment) {
+        return _PrioritySegmentRow(segment: segment);
+      }).toList(),
+    );
+  }
+}
+
+class _PrioritySegmentRow extends StatelessWidget {
+  const _PrioritySegmentRow({required this.segment});
+
+  final PrioritySegmentInsight segment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
+
+    final isNeedsRetry = segment.status == SegmentProgressStatus.needsRetry;
+    final statusColor =
+        isNeedsRetry ? itqanTheme.overdue : itqanTheme.confidenceLow;
+    final statusText = isNeedsRetry ? 'يحتاج إعادة' : 'ضعيف';
+
+    final sourceText = segment.source == SegmentProgressSource.appMemorization
+        ? 'حفظ جديد'
+        : 'حفظ سابق';
+
+    return Card(
+      elevation: 0,
+      color: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+      ),
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
           children: [
-            Text(value,
-                style: AppTypography.cardTitle
-                    .copyWith(color: color, fontSize: 24)),
-            if (unit != null) ...[
-              const SizedBox(width: AppSpacing.xs),
-              Text(unit!,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    segment.displayRange,
+                    style: AppTypography.body.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'المصدر: $sourceText',
+                    style:
+                        AppTypography.caption.copyWith(color: theme.hintColor),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+              decoration: BoxDecoration(
+                color: statusColor.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(color: statusColor.withValues(alpha: 0.15)),
+              ),
+              child: Text(
+                statusText,
+                style: AppTypography.caption.copyWith(
+                  color: statusColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RecentActivitySection extends StatelessWidget {
+  const _RecentActivitySection({required this.summary});
+
+  final ProgressInsightSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final itqanTheme = theme.extension<ItqanThemeExtension>()!;
+
+    return Card(
+      elevation: 0,
+      color: theme.cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'عدد الجلسات خلال آخر ٧ أيام:',
                   style:
-                      AppTypography.bodySmall.copyWith(color: theme.hintColor)),
+                      AppTypography.bodySmall.copyWith(color: theme.hintColor),
+                ),
+                Text(
+                  '${summary.recentSessionCount} جلسات',
+                  style: AppTypography.body.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: itqanTheme.memorizeActive,
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: AppSpacing.lg),
+            if (summary.lastSessionAt != null) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('آخر جلسة:',
+                      style: AppTypography.bodySmall
+                          .copyWith(color: theme.hintColor)),
+                  Text(
+                    DateFormat('yyyy/MM/dd').format(summary.lastSessionAt!),
+                    style: AppTypography.bodySmall
+                        .copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+            if (summary.recentSessionCount == 0)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  child: Text(
+                    'لا توجد جلسات حديثة خلال آخر ٧ أيام.',
+                    style: AppTypography.bodySmall
+                        .copyWith(color: theme.hintColor),
+                  ),
+                ),
+              )
+            else ...[
+              Text(
+                'تقييم الجلسات الأخير:',
+                style: AppTypography.caption.copyWith(color: theme.hintColor),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _buildRatingBreakdown(context, summary.ratingBreakdown),
             ],
           ],
         ),
-      ],
+      ),
     );
   }
+
+  Widget _buildRatingBreakdown(
+      BuildContext context, SessionRatingBreakdown breakdown) {
+    final itqanTheme = Theme.of(context).extension<ItqanThemeExtension>()!;
+
+    final items = <_RatingChip>[
+      _RatingChip(
+          label: 'سهل',
+          count: breakdown.easyCount,
+          color: itqanTheme.completed),
+      _RatingChip(
+          label: 'جيد',
+          count: breakdown.goodCount,
+          color: itqanTheme.reviewDue),
+      _RatingChip(
+          label: 'صعب',
+          count: breakdown.hardCount,
+          color: itqanTheme.confidenceLow),
+      _RatingChip(
+          label: 'لم أتمكن',
+          count: breakdown.againCount,
+          color: itqanTheme.overdue),
+      if (breakdown.unratedCount > 0)
+        _RatingChip(
+            label: 'غير مقيّم',
+            count: breakdown.unratedCount,
+            color: Theme.of(context).hintColor),
+    ];
+
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: items.map((item) {
+        return Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+          decoration: BoxDecoration(
+            color: item.color.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(color: item.color.withValues(alpha: 0.15)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                item.label,
+                style: AppTypography.caption
+                    .copyWith(color: item.color, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                '(${item.count})',
+                style: AppTypography.caption
+                    .copyWith(color: item.color, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _RatingChip {
+  const _RatingChip({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
 }
 
 class _NoProgressState extends StatelessWidget {
@@ -356,11 +683,11 @@ class _NoProgressState extends StatelessWidget {
             Icon(
               Icons.bar_chart_rounded,
               size: 48,
-              color: theme.hintColor.withOpacity(0.5),
+              color: theme.hintColor.withValues(alpha: 0.5),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              'ابدأ خطتك ونفذ مهامك لتظهر إحصائيات تقدمك هنا.',
+              'لا توجد بيانات كافية بعد. ابدأ جلسات الحفظ والمراجعة ليظهر تقدمك هنا.',
               textAlign: TextAlign.center,
               style: AppTypography.bodyLarge.copyWith(
                 color: theme.hintColor,

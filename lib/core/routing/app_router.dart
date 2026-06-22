@@ -5,6 +5,7 @@ import 'package:itqan/features/session/presentation/session_screen.dart';
 import 'package:itqan/features/progress/presentation/progress_screen.dart';
 import 'package:itqan/features/library/presentation/library_screen.dart';
 import 'package:itqan/features/settings/presentation/settings_screen.dart';
+import 'package:itqan/features/previous_memorization/presentation/previous_memorization_registry_screen.dart';
 
 import '../../features/plan/presentation/plan_screen.dart';
 import '../../features/setup/application/setup_providers.dart';
@@ -21,6 +22,7 @@ abstract final class AppRoutes {
   static const String progress = 'progress';
   static const String library = 'library';
   static const String settings = 'settings';
+  static const String previousMemorizationRegistry = 'previous_memorization_registry';
 }
 
 /// Route paths.
@@ -32,6 +34,7 @@ abstract final class AppPaths {
   static const String progress = '/progress';
   static const String library = '/library';
   static const String settings = '/settings';
+  static const String previousMemorizationRegistry = '/previous_memorization_registry';
 }
 
 /// Application router provider.
@@ -65,6 +68,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRoutes.settings,
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: AppPaths.previousMemorizationRegistry,
+        name: AppRoutes.previousMemorizationRegistry,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const PreviousMemorizationRegistryScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {

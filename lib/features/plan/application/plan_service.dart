@@ -13,7 +13,10 @@ class PlanService {
 
   final PlanRepository _repository;
 
-  /// Creates a new active plan from setup and a starting position.
+  /// Creates a new active plan from setup and an explicit starting position.
+  ///
+  /// [startPosition] is ALWAYS explicitly provided. It is never inferred
+  /// from [setup.previousMemorizedRange].
   Future<ActivePlanEntity> initPlan({
     required UserSetup setup,
     required QuranPosition startPosition,
@@ -27,25 +30,58 @@ class PlanService {
       reviewTarget: setup.reviewTarget,
       startPosition: startPosition,
       currentPosition: startPosition,
+      memorizationDays: setup.memorizationDays,
+      reviewSchedule: setup.reviewSchedule,
+      customReviewDays: setup.customReviewDays,
+      previousMemorizedRanges: setup.previousMemorizedRanges,
     );
 
     return await _repository.createActivePlan(plan);
   }
 
-  /// Gets today's assignment or creates it if it doesn't exist.
-  Future<DayAssignmentEntity?> getOrCreateTodayAssignment(ActivePlanEntity plan) async {
+  /// Gets today's assignment, creating it if it doesn't exist.
+  ///
+  /// ## Task generation rules
+  /// - [hasMemoTask] = true only if today is in [plan.memorizationDays].
+  /// - [hasReviewTask] = true only if:
+  ///   - Today is a scheduled review day, AND
+  ///   - There is known content to review ([plan.previousMemorizedRange] != null
+  ///     OR at least one memorization session has been completed).
+  Future<DayAssignmentEntity?> getOrCreateTodayAssignment(
+      ActivePlanEntity plan) async {
     final dateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    
+
     final existing = await _repository.getAssignmentByDate(plan.id, dateKey);
     if (existing != null) return existing;
 
-    // Check if the plan has already seen any completed work
-    final recent = await _repository.getRecentAssignments(plan.id, limit: 1);
-    final hasStarted = recent.any((a) => a.isMemoDone);
+    final todayWeekday = DateTime.now().weekday; // 1=Mon … 7=Sun
+    final isMemoDay = plan.memorizationDays.contains(todayWeekday);
+    final isReviewDay = plan.effectiveReviewDays.contains(todayWeekday);
 
-    // Generate new assignment
-    final memoStart = hasStarted ? _nextPosition(plan.currentPosition) : plan.currentPosition;
-    final memoEnd = _calculateEndPosition(memoStart, plan.memorizationTarget);
+    // Determine if there is any known content to review.
+    final hasKnownReviewContent = plan.previousMemorizedRanges.isNotEmpty ||
+        await _repository.hasCompletedMemorizationSession(plan.id);
+
+    final hasMemoTask = isMemoDay;
+    final hasReviewTask = isReviewDay && hasKnownReviewContent;
+
+    // Calculate memorization range for today (only if it's a memo day).
+    final QuranPosition memoStart;
+    final QuranPosition memoEnd;
+
+    if (hasMemoTask) {
+      final recent =
+          await _repository.getRecentAssignments(plan.id, limit: 1);
+      final hasStarted = recent.any((a) => a.isMemoDone);
+      memoStart = hasStarted
+          ? _nextPosition(plan.currentPosition)
+          : plan.currentPosition;
+      memoEnd = _calculateEndPosition(memoStart, plan.memorizationTarget);
+    } else {
+      // Rest day for memorization — position values are irrelevant but non-null.
+      memoStart = plan.currentPosition;
+      memoEnd = plan.currentPosition;
+    }
 
     final assignment = DayAssignmentEntity(
       id: _repository.nextId(),
@@ -55,6 +91,8 @@ class PlanService {
       memoEnd: memoEnd,
       memoTarget: plan.memorizationTarget,
       reviewTarget: plan.reviewTarget,
+      hasMemoTask: hasMemoTask,
+      hasReviewTask: hasReviewTask,
       createdAt: DateTime.now(),
     );
 
@@ -62,56 +100,45 @@ class PlanService {
     return assignment;
   }
 
-  /// Completes or undoes a memorization task, updating the plan pointer.
-  /// 
-  /// Progression Rule:
-  /// - On completion: Advances plan.currentPosition to assignment.memoEnd.
-  /// - On undo: Reverts plan.currentPosition to assignment.memoStart, but ONLY
-  ///   if the current pointer is at memoEnd (ensuring no subsequent progress is lost).
-  Future<void> toggleMemorization({
+  /// Completes a memorization task and advances the plan pointer.
+  /// Guard: only advances if [assignment.isMemoDone] is false.
+  Future<void> completeMemorization({
     required ActivePlanEntity plan,
     required DayAssignmentEntity assignment,
-    required bool isDone,
   }) async {
-    final bool canUpdatePointer = isDone || plan.currentPosition == assignment.memoEnd;
+    if (assignment.isMemoDone) return;
 
-    if (canUpdatePointer) {
-      final updatedPlan = plan.copyWith(
-        currentPosition: isDone ? assignment.memoEnd : assignment.memoStart,
-      );
-      await _repository.updateActivePlan(updatedPlan);
-    }
+    final updatedPlan = plan.copyWith(currentPosition: assignment.memoEnd);
+    await _repository.updateActivePlan(updatedPlan);
 
-    final updatedAssignment = assignment.copyWith(isMemoDone: isDone);
+    final updatedAssignment = assignment.copyWith(isMemoDone: true);
     await _repository.saveAssignment(updatedAssignment);
   }
 
-  /// Calculates the end position based on start and target (inclusive).
+  // ── Private helpers ──────────────────────────────────────────────────────────
+
   QuranPosition _calculateEndPosition(QuranPosition start, DailyTarget target) {
     int remainingAyahs = _convertTargetToAyahs(target);
     if (remainingAyahs <= 1) return start;
 
     int currentSurah = start.surahNumber;
     int currentAyah = start.ayahNumber;
-
-    // Move forward (remainingAyahs - 1) times from the start position
     int toMove = remainingAyahs - 1;
 
     while (toMove > 0) {
-      final ayahsInCurrentSurah = QuranMetadata.getAyahCount(currentSurah);
-      final ayahsLeftInSurah = ayahsInCurrentSurah - currentAyah;
+      final ayahsInCurrent = QuranMetadata.getAyahCount(currentSurah);
+      final ayahsLeft = ayahsInCurrent - currentAyah;
 
-      if (toMove <= ayahsLeftInSurah) {
+      if (toMove <= ayahsLeft) {
         currentAyah += toMove;
         toMove = 0;
       } else {
-        toMove -= (ayahsLeftInSurah + 1);
+        toMove -= (ayahsLeft + 1);
         if (currentSurah < 114) {
           currentSurah++;
           currentAyah = 1;
         } else {
-          // Reached end of Quran
-          currentAyah = ayahsInCurrentSurah;
+          currentAyah = ayahsInCurrent;
           toMove = 0;
         }
       }
@@ -120,42 +147,29 @@ class PlanService {
     return QuranPosition(surahNumber: currentSurah, ayahNumber: currentAyah);
   }
 
-  /// Calculates the immediate next position in the Quran.
   QuranPosition _nextPosition(QuranPosition current) {
     final ayahsInCurrent = QuranMetadata.getAyahCount(current.surahNumber);
-    
     if (current.ayahNumber < ayahsInCurrent) {
       return QuranPosition(
         surahNumber: current.surahNumber,
         ayahNumber: current.ayahNumber + 1,
       );
     }
-    
     if (current.surahNumber < 114) {
-      return QuranPosition(
-        surahNumber: current.surahNumber + 1,
-        ayahNumber: 1,
-      );
+      return QuranPosition(surahNumber: current.surahNumber + 1, ayahNumber: 1);
     }
-    
-    // Reached the end
     return current;
   }
 
-  /// Converts target amount into a raw ayah count for range calculation.
-  /// 
-  /// [V1 POLICY: ALTERNATIVE (Approximation)]
-  /// This implementation uses fixed approximations (e.g., 15 ayahs per page)
-  /// to enable position-aware progression for all units in V1.
-  /// This is NOT semantically exact and will be replaced by mushaf-aware 
-  /// mapping in future increments.
+  /// [V1 POLICY: APPROXIMATION]
+  /// Uses fixed ayah counts per unit. Will be replaced by mushaf-aware mapping.
   int _convertTargetToAyahs(DailyTarget target) {
     final amount = target.amount.toInt();
     return switch (target.unit) {
       ProgressUnit.ayah => amount,
-      ProgressUnit.page => amount * 15, // Approximation for V1
-      ProgressUnit.hizb => amount * 100, // Approximation
-      ProgressUnit.juz => amount * 200, // Approximation
+      ProgressUnit.page => amount * 15,
+      ProgressUnit.hizb => amount * 100,
+      ProgressUnit.juz => amount * 200,
     };
   }
 }

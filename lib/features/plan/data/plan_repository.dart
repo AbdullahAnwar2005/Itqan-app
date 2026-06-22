@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -16,20 +17,39 @@ class PlanRepository {
 
   /// Retrieves the current plan (active or paused), if any.
   Future<ActivePlanEntity?> getActivePlan() async {
-    final query = _db.select(_db.activePlans)
-      ..where((t) => t.status.equals(PlanStatus.active.name) | t.status.equals(PlanStatus.paused.name))
+    // 1. First, search for the latest active plan
+    final activeQuery = _db.select(_db.activePlans)
+      ..where((t) => t.status.equals(PlanStatus.active.name))
+      ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)])
+      ..limit(1);
+    
+    final activeRow = await activeQuery.getSingleOrNull();
+    if (activeRow != null) {
+      return PlanMappers.activePlanFromDb(activeRow);
+    }
+
+    // 2. Fallback: search for the latest paused plan
+    final pausedQuery = _db.select(_db.activePlans)
+      ..where((t) => t.status.equals(PlanStatus.paused.name))
+      ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)])
       ..limit(1);
 
-    final row = await query.getSingleOrNull();
-    return row != null ? PlanMappers.activePlanFromDb(row) : null;
+    final pausedRow = await pausedQuery.getSingleOrNull();
+    if (pausedRow != null) {
+      return PlanMappers.activePlanFromDb(pausedRow);
+    }
+
+    return null;
   }
 
   /// Creates a new active plan.
-  /// Enforces the single-active-plan rule by pausing any existing active plans.
+  /// Pauses any existing active or paused plans — enforces single-plan rule.
   Future<ActivePlanEntity> createActivePlan(ActivePlanEntity plan) async {
     return await _db.transaction(() async {
       await (_db.update(_db.activePlans)
-            ..where((t) => t.status.equals(PlanStatus.active.name)))
+            ..where((t) =>
+                t.status.equals(PlanStatus.active.name) |
+                t.status.equals(PlanStatus.paused.name)))
           .write(
         ActivePlansCompanion(
           status: Value(PlanStatus.paused.name),
@@ -50,6 +70,13 @@ class PlanRepository {
         memorizationStartAyah: Value(plan.startPosition.ayahNumber),
         currentMemorizationSurah: Value(plan.currentPosition.surahNumber),
         currentMemorizationAyah: Value(plan.currentPosition.ayahNumber),
+        memorizationDays:
+            Value(PlanMappers.encodeDaySet(plan.memorizationDays)),
+        reviewSchedule: Value(plan.reviewSchedule.persistenceKey),
+        customReviewDays:
+            Value(PlanMappers.encodeDaySet(plan.customReviewDays)),
+        previousMemorizedRanges: Value(jsonEncode(
+            plan.previousMemorizedRanges.map((r) => r.toMap()).toList())),
       );
 
       await _db.into(_db.activePlans).insert(companion);
@@ -57,7 +84,7 @@ class PlanRepository {
     });
   }
 
-  /// Updates an existing plan.
+  /// Updates an existing plan (status and current position only).
   Future<void> updateActivePlan(ActivePlanEntity plan) async {
     await (_db.update(_db.activePlans)..where((t) => t.id.equals(plan.id)))
         .write(
@@ -83,7 +110,7 @@ class PlanRepository {
     return row != null ? PlanMappers.dayAssignmentFromDb(row) : null;
   }
 
-  /// Persists a day assignment.
+  /// Persists a day assignment (insert or update on conflict).
   Future<void> saveAssignment(DayAssignmentEntity assignment) async {
     await _db.into(_db.dayAssignments).insertOnConflictUpdate(
           DayAssignmentsCompanion(
@@ -98,6 +125,8 @@ class PlanRepository {
             memorizationUnit: Value(assignment.memoTarget.unit.name),
             reviewAmount: Value(assignment.reviewTarget.amount),
             reviewUnit: Value(assignment.reviewTarget.unit.name),
+            hasMemoTask: Value(assignment.hasMemoTask),
+            hasReviewTask: Value(assignment.hasReviewTask),
             isMemorizationDone: Value(assignment.isMemoDone),
             isReviewDone: Value(assignment.isReviewDone),
             createdAt: Value(assignment.createdAt),
@@ -105,7 +134,7 @@ class PlanRepository {
         );
   }
 
-  /// Retrieves a list of recent assignments for a plan.
+  /// Retrieves recent assignments for a plan, most recent first.
   Future<List<DayAssignmentEntity>> getRecentAssignments(
     String planId, {
     int limit = 30,
@@ -119,6 +148,34 @@ class PlanRepository {
 
     final rows = await query.get();
     return rows.map(PlanMappers.dayAssignmentFromDb).toList();
+  }
+
+  /// Retrieves past assignments for a plan strictly before the given date key.
+  Future<List<DayAssignmentEntity>> getPastAssignmentsForPlan({
+    required String planId,
+    required String beforeDateKey,
+  }) async {
+    final query = _db.select(_db.dayAssignments)
+      ..where((t) => t.planId.equals(planId) & t.dateKey.isSmallerThanValue(beforeDateKey))
+      ..orderBy([
+        (t) => OrderingTerm(expression: t.dateKey, mode: OrderingMode.asc)
+      ]);
+
+    final rows = await query.get();
+    return rows.map(PlanMappers.dayAssignmentFromDb).toList();
+  }
+
+  /// Returns true if the plan has at least one completed memorization assignment.
+  Future<bool> hasCompletedMemorizationSession(String planId) async {
+    final query = _db.select(_db.dayAssignments)
+      ..where((t) =>
+          t.planId.equals(planId) &
+          t.hasMemoTask.equals(true) &
+          t.isMemorizationDone.equals(true))
+      ..limit(1);
+
+    final row = await query.getSingleOrNull();
+    return row != null;
   }
 
   String nextId() => _uuid.v4();
